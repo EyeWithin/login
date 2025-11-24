@@ -176,6 +176,70 @@
             margin-bottom: 20px;
         }
 
+        /* Phone input with dial code */
+        .phone-input {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .dial-code {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 64px;
+            padding: 10px 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: #f6f6f6;
+            font-size: 14px;
+            color: #333;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .dial-code:focus {
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(0,0,0,0.04);
+        }
+
+        /* Dial code dropdown */
+        .dial-dropdown {
+            position: absolute;
+            background: white;
+            border: 1px solid #e5e5e5;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+            border-radius: 6px;
+            width: 240px;
+            max-height: 260px;
+            overflow: auto;
+            z-index: 9999;
+            padding: 8px 0;
+        }
+
+        .dial-search {
+            display: block;
+            width: calc(100% - 16px);
+            margin: 6px 8px 10px;
+            padding: 8px 10px;
+            border: 1px solid #f0f0f0;
+            border-radius: 4px;
+        }
+
+        .dial-item {
+            padding: 8px 12px;
+            font-size: 14px;
+            color: #333;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .dial-item:hover {
+            background: #f6f6f6;
+        }
+
         .checkbox-group input[type="checkbox"] {
             width: 16px;
             height: 16px;
@@ -357,7 +421,10 @@
 
                 <div class="form-group">
                     <label for="signup-mobile-number">Mobile Number *</label>
-                    <input type="tel" id="signup-mobile-number" placeholder="+91 " required>
+                    <div class="phone-input">
+                        <button type="button" id="signup-dial" class="dial-code" title="Click to edit country code">+91</button>
+                        <input type="tel" id="signup-mobile-number" placeholder="Enter mobile number" required>
+                    </div>
                 </div>
 
                 <div class="form-group">
@@ -403,7 +470,10 @@
             <form id="signin-mobile" onsubmit="handleSubmit(event, 'signin')">
                 <div class="form-group">
                     <label for="signin-mobile-number">Mobile Number *</label>
-                    <input type="tel" id="signin-mobile-number" placeholder="+91 " required>
+                    <div class="phone-input">
+                        <button type="button" id="signin-dial" class="dial-code" title="Click to edit country code">+91</button>
+                        <input type="tel" id="signin-mobile-number" placeholder="Enter mobile number" required>
+                    </div>
                 </div>
 
                 <div class="checkbox-group">
@@ -483,6 +553,7 @@
     <script>
         let signinMethod = 'mobile';
 
+        // Basic tab switching
         function switchTab(tab) {
             const tabs = document.querySelectorAll('.tab');
             const forms = document.querySelectorAll('.form-container');
@@ -530,23 +601,188 @@
             }
         }
 
+        // Auto-detect dial code using IP geolocation (ipapi.co). Allows manual override by clicking the dial element.
+        async function detectDialCode() {
+            const defaultCode = '+91';
+            try {
+                const res = await fetch('https://ipapi.co/json/');
+                if (!res.ok) throw new Error('ipapi error');
+                const data = await res.json();
+                // ipapi returns country_calling_code like "+91"
+                const code = data && data.country_calling_code ? data.country_calling_code : defaultCode;
+                setDialCodeForAll(code);
+            } catch (err) {
+                // Fallback: use default and let user change manually
+                setDialCodeForAll(defaultCode);
+                console.warn('Dial code detection failed, using default', err);
+            }
+        }
+
+        function setDialCodeForAll(code) {
+            const signupDial = document.getElementById('signup-dial');
+            const signinDial = document.getElementById('signin-dial');
+            if (signupDial) signupDial.textContent = code;
+            if (signinDial) signinDial.textContent = code;
+        }
+
+        // Build a small dropdown for selecting country dial codes
+        const countryCodes = [
+            { name: 'India', code: '+91' },
+            { name: 'United States', code: '+1' },
+            { name: 'United Kingdom', code: '+44' },
+            { name: 'Canada', code: '+1' },
+            { name: 'Australia', code: '+61' },
+            { name: 'Germany', code: '+49' },
+            { name: 'France', code: '+33' },
+            { name: 'Spain', code: '+34' },
+            { name: 'China', code: '+86' },
+            { name: 'Japan', code: '+81' },
+            { name: 'UAE', code: '+971' }
+        ];
+
+        let currentDialButton = null; // reference to the button that opened the dropdown
+
+        function createDialDropdown() {
+            // Only create once
+            if (document.getElementById('dial-dropdown')) return;
+
+            const dropdown = document.createElement('div');
+            dropdown.id = 'dial-dropdown';
+            dropdown.className = 'dial-dropdown hidden';
+
+            const search = document.createElement('input');
+            search.type = 'search';
+            search.placeholder = 'Search country or code...';
+            search.className = 'dial-search';
+            dropdown.appendChild(search);
+
+            const list = document.createElement('div');
+            list.id = 'dial-list';
+            dropdown.appendChild(list);
+
+            document.body.appendChild(dropdown);
+
+            // Populate
+            function renderList(filter = '') {
+                const q = filter.trim().toLowerCase();
+                list.innerHTML = '';
+                const filtered = countryCodes.filter(c => (c.name + ' ' + c.code).toLowerCase().includes(q));
+                filtered.forEach(c => {
+                    const item = document.createElement('div');
+                    item.className = 'dial-item';
+                    item.innerHTML = `<span>${c.name}</span><strong>${c.code}</strong>`;
+                    item.addEventListener('click', () => {
+                        if (currentDialButton) currentDialButton.textContent = c.code;
+                        hideDialDropdown();
+                    });
+                    list.appendChild(item);
+                });
+                if (filtered.length === 0) {
+                    const none = document.createElement('div');
+                    none.className = 'dial-item';
+                    none.textContent = 'No results';
+                    list.appendChild(none);
+                }
+            }
+
+            search.addEventListener('input', () => renderList(search.value));
+            renderList();
+
+            // Close on outside click
+            document.addEventListener('click', (ev) => {
+                const path = ev.composedPath ? ev.composedPath() : (ev.path || []);
+                if (!path.includes(dropdown) && !path.some(el => el && el.classList && el.classList.contains && el.classList.contains('dial-code'))) {
+                    hideDialDropdown();
+                }
+            });
+        }
+
+        function showDialDropdown(button) {
+            createDialDropdown();
+            const dropdown = document.getElementById('dial-dropdown');
+            const rect = button.getBoundingClientRect();
+            dropdown.style.top = `${rect.bottom + window.scrollY + 8}px`;
+            dropdown.style.left = `${Math.max(8, rect.left + window.scrollX - 120 + rect.width / 2)}px`;
+            dropdown.classList.remove('hidden');
+            currentDialButton = button;
+            // focus search input
+            const search = dropdown.querySelector('.dial-search');
+            if (search) { search.value = ''; search.focus(); }
+        }
+
+        function hideDialDropdown() {
+            const dropdown = document.getElementById('dial-dropdown');
+            if (dropdown) dropdown.classList.add('hidden');
+            currentDialButton = null;
+        }
+
+        // Attach click handlers to dial buttons to open the dropdown
+        function attachDialHandlers() {
+            const controls = document.querySelectorAll('.dial-code');
+            controls.forEach(btn => {
+                // prevent multiple listeners
+                btn.removeEventListener('click', btn._dialHandler);
+                const handler = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    showDialDropdown(btn);
+                };
+                btn.addEventListener('click', handler);
+                btn._dialHandler = handler;
+            });
+        }
+
+        // sendOTP updated to include dial code when sending to mobile forms
         function sendOTP(event, formType) {
             event.preventDefault();
-            
-            // Hide the send OTP button and show OTP input section
+
             const otpSection = document.getElementById(`${formType}-otp`);
             const button = event.target;
-            
-            button.classList.add('hidden');
-            otpSection.classList.remove('hidden');
-            
-            // Simulate OTP sent
-            alert('OTP has been sent to your mobile/email!');
+
+            // Determine destination for message
+            let destination = '';
+            if (formType === 'signup' || formType === 'signin-mobile') {
+                const inputId = formType === 'signup' ? 'signup-mobile-number' : 'signin-mobile-number';
+                const dialId = formType === 'signup' ? 'signup-dial' : 'signin-dial';
+                const input = document.getElementById(inputId);
+                const dial = document.getElementById(dialId);
+                const number = input ? input.value.trim() : '';
+                const code = dial ? dial.textContent.trim() : '';
+                if (!number) {
+                    alert('Please enter your mobile number first.');
+                    return;
+                }
+                destination = `${code} ${number}`;
+            } else if (formType === 'signin-email') {
+                const email = document.getElementById('signin-email-address').value.trim();
+                if (!email) { alert('Please enter your email'); return; }
+                destination = email;
+            }
+
+            // Hide send button and show OTP UI if present
+            if (button && button.classList) button.classList.add('hidden');
+            if (otpSection) otpSection.classList.remove('hidden');
+
+            // Simulate OTP sent with destination information
+            alert(`OTP has been sent to ${destination}`);
         }
 
         function resendOTP(event, formType) {
             event.preventDefault();
-            alert('OTP has been resent!');
+            // For UX we can re-check the destination and show it
+            let destination = '';
+            if (formType === 'signup' || formType === 'signin-mobile') {
+                const inputId = formType === 'signup' ? 'signup-mobile-number' : 'signin-mobile-number';
+                const dialId = formType === 'signup' ? 'signup-dial' : 'signin-dial';
+                const input = document.getElementById(inputId);
+                const dial = document.getElementById(dialId);
+                const number = input ? input.value.trim() : '';
+                const code = dial ? dial.textContent.trim() : '';
+                destination = number ? `${code} ${number}` : code;
+            } else if (formType === 'signin-email') {
+                destination = document.getElementById('signin-email-address').value.trim();
+            }
+            alert(`OTP has been resent to ${destination || 'your contact'}`);
         }
 
         function handleSubmit(event, type) {
@@ -557,6 +793,13 @@
         function socialLogin(provider) {
             alert(`${provider.charAt(0).toUpperCase() + provider.slice(1)} login clicked`);
         }
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            detectDialCode();
+            createDialDropdown();
+            attachDialHandlers();
+        });
     </script>
 </body>
 </html>
